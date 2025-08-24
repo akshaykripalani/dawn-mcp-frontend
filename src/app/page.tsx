@@ -103,7 +103,7 @@ export default function Home() {
 					</p>
 					<AgentBlob state={agentState} />
 					<p className="text-xl font-semibold capitalize">
-						{agentState === "idle" ? "Ready" : "Ready"}
+						{agentState === "idle" ? "Ready" : agentState}
 					</p>
 					<Button
 						onClick={handleRecordClick}
