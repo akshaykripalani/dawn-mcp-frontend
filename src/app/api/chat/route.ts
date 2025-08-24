@@ -1,5 +1,9 @@
 import { google } from "@ai-sdk/google";
-import { generateText, experimental_createMCPClient } from "ai";
+import {
+  generateText,
+  experimental_createMCPClient,
+  CoreMessage,
+} from "ai";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { z } from "zod";
 
@@ -13,7 +17,7 @@ const mcpToolSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const { messages } = await req.json();
+  const { messages }: { messages: CoreMessage[] } = await req.json();
 
   if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
     return new Response(
@@ -42,24 +46,65 @@ export async function POST(req: Request) {
     ),
   });
 
-  let allTools;
   try {
     const perplexityTools = await perplexityClient.tools();
     const budgetTools = await budgetClient.tools();
-    allTools = { ...perplexityTools, ...budgetTools };
+    const allTools = { ...perplexityTools, ...budgetTools };
+
+    const result = await generateText({
+      model: google("gemini-2.5-flash"),
+      system: "You are a helpful assistant named DawnAI.",
+      messages: messages,
+      tools: allTools,
+    });
+
+    if (result.toolCalls && result.toolCalls.length > 0) {
+      const toolResults = await Promise.all(
+        result.toolCalls.map(async (toolCall) => {
+          const { toolName, args } = toolCall as any;
+          const tool = allTools[toolName];
+          if (!tool) {
+            throw new Error(`Tool ${toolName} not found`);
+          }
+          return (tool as any).execute(args);
+        })
+      );
+
+      const newMessages: CoreMessage[] = [
+        ...messages,
+        { role: "assistant", content: result.text },
+        {
+          role: "user",
+          content: `Tool results: ${JSON.stringify(toolResults)}`,
+        },
+      ];
+
+      const finalResult = await generateText({
+        model: google("gemini-2.5-flash"),
+        system: "You are a helpful assistant named DawnAI.",
+        messages: newMessages,
+        tools: allTools,
+      });
+
+      return new Response(
+        JSON.stringify({
+          text: finalResult.text,
+          toolCalls: finalResult.toolCalls,
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({ text: result.text, toolCalls: result.toolCalls }),
+      {
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   } finally {
     await perplexityClient.close();
     await budgetClient.close();
   }
-
-  const { text, toolCalls } = await generateText({
-    model: google("gemini-2.5-flash"),
-    system: "You are a helpful assistant named DawnAI.",
-    messages: messages,
-    tools: allTools,
-  });
-
-  return new Response(JSON.stringify({ text, toolCalls }), {
-    headers: { "Content-Type": "application/json" },
-  });
 }
