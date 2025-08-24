@@ -14,34 +14,42 @@ export default function Home() {
 	const [agentState, setAgentState] = useState<AgentState>("idle");
 	const lastMessageRef = useRef<string | null>(null);
 
-	const chatHelpers = useChat({
-		api: "/api/chat" as any,
-		onFinish: async (message: any) => {
+	const { messages, sendMessage, status } = useChat({
+		onFinish: async ({ message }) => {
+			const content = message.parts
+				.filter((part) => part.type === "text")
+				.map((part) => part.text)
+				.join("");
 			// Skip TTS for tool-control messages
-			if (message.content?.startsWith("TOOL_CALL:") || message.content?.startsWith("TOOL_RESULT:")) {
+			if (content.startsWith("TOOL_CALL:") || content.startsWith("TOOL_RESULT:")) {
 				return;
 			}
 			setAgentState("speaking");
-			await fetchAndPlayTTS(message.content || "");
+			await fetchAndPlayTTS(content || "");
 			setAgentState("idle");
 		},
-		onError: (error: any) => {
+		onError: (error) => {
 			toast.error(`AI Error: ${error.message}`);
 			setAgentState("idle");
 		},
-	} as any);
-	
-	const { messages, append, isLoading } = chatHelpers as any;
+	});
+
+	const isLoading = status === "submitted" || status === "streaming";
 
 	useEffect(() => {
-		const lastMessage = messages[messages.length - 1] as any;
+		const lastMessage = messages[messages.length - 1];
 		if (!lastMessage || isLoading) return;
-		if (lastMessage.content === lastMessageRef.current) return;
-		lastMessageRef.current = lastMessage.content;
+		const content = lastMessage.parts
+			.filter((part) => part.type === "text")
+			.map((part) => part.text)
+			.join("");
 
-		if (lastMessage.role === "assistant" && lastMessage.content?.startsWith("TOOL_CALL:")) {
+		if (content === lastMessageRef.current) return;
+		lastMessageRef.current = content;
+
+		if (lastMessage.role === "assistant" && content.startsWith("TOOL_CALL:")) {
 			try {
-				const payload = JSON.parse(lastMessage.content.replace("TOOL_CALL:", ""));
+				const payload = JSON.parse(content.replace("TOOL_CALL:", ""));
 				setAgentState("thinking");
 				fetch("/api/execute-mcp-tool", {
 					method: "POST",
@@ -57,7 +65,10 @@ export default function Home() {
 						if (data.status === "ok") {
 							toast.success("Tool operation successful");
 							// Send TOOL_RESULT back to the model to continue conversation
-							append({ role: "user", content: `TOOL_RESULT:${JSON.stringify(data)}` } as any);
+							sendMessage({
+								role: "user",
+								parts: [{ type: "text", text: `TOOL_RESULT:${JSON.stringify(data)}` }],
+							});
 						} else {
 							toast.error(data.message || "Tool operation failed");
 						}
@@ -72,7 +83,7 @@ export default function Home() {
 				toast.error("Invalid tool payload");
 			}
 		}
-	}, [messages, isLoading, append]);
+	}, [messages, isLoading, sendMessage]);
 
 	const recorder = useAudioRecorder();
 
@@ -85,7 +96,11 @@ export default function Home() {
 			const blob = await recorder.stop();
 			if (blob) {
 				const text = await transcribeAudio(blob);
-				if (text) append({ role: "user", content: text });
+				if (text)
+					sendMessage({
+						role: "user",
+						parts: [{ type: "text", text: text }],
+					});
 				else setAgentState("idle");
 			}
 		}
