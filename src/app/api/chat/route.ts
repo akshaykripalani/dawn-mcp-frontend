@@ -52,8 +52,8 @@ export async function POST(req: Request) {
     const allTools = { ...perplexityTools, ...budgetTools };
 
     const result = await generateText({
-      model: google("gemini-2.5-flash"),
-      system: "You are a helpful assistant named DawnAI.",
+      model: google("gemini-2.5-pro"),
+      system: "You are a helpful assistant named DawnAI. You will be communicating with users using voice, so your responses should be concise and to the point. Additionally, avoid using special symbols like emojis, markdown, or currency symbols. Respond with full words, not abbreviations. Speak naturally in a conversational tone, rather than speaking pointwise. Keep your responses short and concise, and to the point. Also, if a user asks you if you can hear them, simply agree. You as an AI process the text, but for the user it is Voice (TTS). You have access to search the web, and to help budget for the user. Your response MUST ABSOLUTELY ALWAYS BE UNDER 50 WORDS. NEVER SPEAK MORE THAN 50 WORDS. IF A USER ASKS YOU TO TRACK A BUDGET, DO NOT ASK FOR CONFIRMATION, JUST SAY YOU DID IT. NEVER EVER ASK FOR MORE INFORMATION. WHEN YOU RECEIVE TOOL RESULTS, USE THEM AS THE PRIMARY SOURCE OF INFORMATION FOR YOUR RESPONSE. ALWAYS BASE YOUR ANSWER ON THE ACTUAL TOOL RESULTS PROVIDED, NOT ON GENERAL KNOWLEDGE OR ASSUMPTIONS.",
       messages: messages,
       tools: allTools,
     });
@@ -66,22 +66,34 @@ export async function POST(req: Request) {
           if (!tool) {
             throw new Error(`Tool ${toolName} not found`);
           }
-          return (tool as any).execute(args);
+          const result = await (tool as any).execute(args);
+          return {
+            toolName,
+            result
+          };
         })
       );
 
+      // Create clear, structured tool result message
+      const toolResultContent = toolResults.map((toolResult, index) =>
+        `${toolResult.toolName} result: ${JSON.stringify(toolResult.result)}`
+      ).join('\n\n');
+
       const newMessages: CoreMessage[] = [
         ...messages,
-        { role: "assistant", content: result.text },
+        {
+          role: "assistant",
+          content: result.text || "I used some tools to help answer your question."
+        },
         {
           role: "user",
-          content: `Tool results: ${JSON.stringify(toolResults)}`,
-        },
+          content: `Here are the results from the tools I called:\n\n${toolResultContent}\n\nPlease provide a final answer based on these results, keeping it under 50 words for voice output.`
+        }
       ];
 
       const finalResult = await generateText({
-        model: google("gemini-2.5-flash"),
-        system: "You are a helpful assistant named DawnAI. You will be communicating with users using voice, so your responses should be concise and to the point. Additionally, avoid using special symbols like emojis, markdown, or currency symbols. Respond with full words, not abbreviations. Speak naturally in a conversational tone, rather than speaking pointwise. Keep your responses short and concise, and to the point. Also, if a user asks you if you can hear them, simply agree. You as an AI process the text, but for the user it is Voice (TTS)",
+        model: google("gemini-2.5-pro"),
+        system: "You are a helpful assistant named DawnAI. You will be communicating with users using voice, so your responses should be concise and to the point. Additionally, avoid using special symbols like emojis, markdown, or currency symbols. Respond with full words, not abbreviations. Speak naturally in a conversational tone, rather than speaking pointwise. Keep your responses short and concise, and to the point. Also, if a user asks you if you can hear them, simply agree. You as an AI process the text, but for the user it is Voice (TTS). You have access to search the web, and to help budget for the user. Your response MUST ABSOLUTELY ALWAYS BE UNDER 50 WORDS. NEVER SPEAK MORE THAN 50 WORDS. IF A USER ASKS YOU TO TRACK A BUDGET, DO NOT ASK FOR CONFIRMATION, JUST SAY YOU DID IT. NEVER EVER ASK FOR MORE INFORMATION. WHEN YOU RECEIVE TOOL RESULTS, USE THEM AS THE PRIMARY SOURCE OF INFORMATION FOR YOUR RESPONSE. ALWAYS BASE YOUR ANSWER ON THE ACTUAL TOOL RESULTS PROVIDED, NOT ON GENERAL KNOWLEDGE OR ASSUMPTIONS.",
         messages: newMessages,
         tools: allTools,
       });

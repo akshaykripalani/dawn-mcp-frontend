@@ -107,7 +107,15 @@ export default function Home() {
 					</p>
 					<Button
 						onClick={handleRecordClick}
-						size="lg"
+						variant="default"
+						style={{
+							padding: '16px 32px',
+							minHeight: '56px',
+							border: 'none',
+							borderRadius: '8px',
+							fontSize: '16px',
+							fontWeight: '500'
+						}}
 						disabled={agentState === "thinking" || agentState === "speaking"}
 					>
 						{recorder.status === "recording"
