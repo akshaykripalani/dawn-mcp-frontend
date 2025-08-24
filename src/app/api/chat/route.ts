@@ -81,7 +81,7 @@ export async function POST(req: Request) {
 
       const finalResult = await generateText({
         model: google("gemini-2.5-flash"),
-        system: "You are a helpful assistant named DawnAI.",
+        system: "You are a helpful assistant named DawnAI. You will be communicating with users using voice, so your responses should be concise and to the point. Additionally, avoid using special symbols like emojis, markdown, or currency symbols. Respond with full words, not abbreviations. Speak naturally in a conversational tone, rather than speaking pointwise.",
         messages: newMessages,
         tools: allTools,
       });
