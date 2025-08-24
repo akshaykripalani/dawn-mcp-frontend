@@ -1,89 +1,77 @@
 "use client";
 
 import AgentBlob from "@/components/agent-blob";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { transcribeAudio, fetchAndPlayTTS } from "@/lib/audioService";
-import { useChat } from "@ai-sdk/react";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import { useAudioRecorder } from "@/hooks/use-audio-recorder";
 
 type AgentState = "idle" | "listening" | "thinking" | "speaking";
 
+// Define a type for our messages
+type Message = {
+	id: string;
+	role: "user" | "assistant";
+	content: string;
+};
+
 export default function Home() {
 	const [agentState, setAgentState] = useState<AgentState>("idle");
-	const lastMessageRef = useRef<string | null>(null);
+	const [messages, setMessages] = useState<Message[]>([]);
 
-	const { messages, sendMessage, status } = useChat({
-		onFinish: async ({ message }) => {
-			const content = message.parts
-				.filter((part) => part.type === "text")
-				.map((part) => part.text)
-				.join("");
-			// Skip TTS for tool-control messages
-			if (content.startsWith("TOOL_CALL:") || content.startsWith("TOOL_RESULT:")) {
-				return;
+	const sendMessage = async (text: string) => {
+		const newUserMessage: Message = {
+			id: `user-${Date.now()}`,
+			role: "user",
+			content: text,
+		};
+		setMessages((prev) => [...prev, newUserMessage]);
+		setAgentState("thinking");
+
+		try {
+			const response = await fetch("/api/chat", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				// Send the whole conversation history
+				body: JSON.stringify({ messages: [...messages, newUserMessage] }),
+			});
+
+			if (!response.ok) {
+				const errorText = await response.text();
+				throw new Error(errorText || `HTTP ${response.status}`);
 			}
+
+			const { text: assistantText, toolCalls } = await response.json();
+			console.log("[page.tsx] Received from /api/chat:", assistantText); // DEBUG
+
+			// Show a toast for each tool call
+			if (toolCalls && toolCalls.length > 0) {
+				for (const toolCall of toolCalls) {
+					toast.success(`Using tool: ${toolCall.toolName}`);
+				}
+			}
+
+			const newAssistantMessage: Message = {
+				id: `assistant-${Date.now()}`,
+				role: "assistant",
+				content: assistantText,
+			};
+			setMessages((prev) => [...prev, newAssistantMessage]);
+
+			// TTS will now be called for all non-empty responses.
+			// The backend now handles the entire tool lifecycle.
+			console.log("[page.tsx] Condition met. Calling fetchAndPlayTTS..."); // DEBUG
 			setAgentState("speaking");
-			await fetchAndPlayTTS(content || "");
-			setAgentState("idle");
-		},
-		onError: (error) => {
+			await fetchAndPlayTTS(assistantText || "");
+		} catch (error: any) {
 			toast.error(`AI Error: ${error.message}`);
+		} finally {
 			setAgentState("idle");
-		},
-	});
-
-	const isLoading = status === "submitted" || status === "streaming";
-
-	useEffect(() => {
-		const lastMessage = messages[messages.length - 1];
-		if (!lastMessage || isLoading) return;
-		const content = lastMessage.parts
-			.filter((part) => part.type === "text")
-			.map((part) => part.text)
-			.join("");
-
-		if (content === lastMessageRef.current) return;
-		lastMessageRef.current = content;
-
-		if (lastMessage.role === "assistant" && content.startsWith("TOOL_CALL:")) {
-			try {
-				const payload = JSON.parse(content.replace("TOOL_CALL:", ""));
-				setAgentState("thinking");
-				fetch("/api/execute-mcp-tool", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify(payload),
-				})
-					.then(async (res) => {
-						if (!res.ok) {
-							const text = await res.text();
-							throw new Error(text || `HTTP ${res.status}`);
-						}
-						const data = await res.json();
-						if (data.status === "ok") {
-							toast.success("Tool operation successful");
-							// Send TOOL_RESULT back to the model to continue conversation
-							sendMessage({
-								role: "user",
-								parts: [{ type: "text", text: `TOOL_RESULT:${JSON.stringify(data)}` }],
-							});
-						} else {
-							toast.error(data.message || "Tool operation failed");
-						}
-					})
-					.catch((err) => {
-						toast.error(`Tool error: ${err.message}`);
-					})
-					.finally(() => {
-						setAgentState("idle");
-					});
-			} catch (e) {
-				toast.error("Invalid tool payload");
-			}
 		}
-	}, [messages, isLoading, sendMessage]);
+	};
 
 	const recorder = useAudioRecorder();
 
@@ -96,12 +84,11 @@ export default function Home() {
 			const blob = await recorder.stop();
 			if (blob) {
 				const text = await transcribeAudio(blob);
-				if (text)
-					sendMessage({
-						role: "user",
-						parts: [{ type: "text", text: text }],
-					});
-				else setAgentState("idle");
+				if (text) {
+					sendMessage(text);
+				} else {
+					setAgentState("idle");
+				}
 			}
 		}
 	};
@@ -116,7 +103,7 @@ export default function Home() {
 					</p>
 					<AgentBlob state={agentState} />
 					<p className="text-xl font-semibold capitalize">
-						{agentState === "idle" ? "Ready" : agentState}
+						{agentState === "idle" ? "Ready" : "Ready"}
 					</p>
 					<Button
 						onClick={handleRecordClick}

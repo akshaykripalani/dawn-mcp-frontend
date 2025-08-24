@@ -41,8 +41,16 @@ export const transcribeAudio = async (audioBlob: Blob): Promise<string> => {
  * @returns A promise that resolves when the audio has finished playing.
  */
 export const fetchAndPlayTTS = (text: string): Promise<void> => {
+  console.log("[audioService.ts] fetchAndPlayTTS called with text:", text); // DEBUG
+  // Don't make a request for empty or whitespace-only strings
+  if (!text.trim()) {
+    console.log("[audioService.ts] Text is empty, skipping TTS request."); // DEBUG
+    return Promise.resolve();
+  }
+
   return new Promise(async (resolve, reject) => {
     try {
+      console.log("[audioService.ts] Making fetch request to TTS_URL:", TTS_URL); // DEBUG
       const response = await fetch(TTS_URL, {
         method: "POST",
         headers: {
@@ -55,7 +63,7 @@ export const fetchAndPlayTTS = (text: string): Promise<void> => {
         throw new Error(`TTS request failed with status ${response.status}`);
       }
 
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       const audioBuffer = await audioContext.decodeAudioData(await response.arrayBuffer());
       
       const source = audioContext.createBufferSource();
